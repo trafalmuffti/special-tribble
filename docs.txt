@@ -1,0 +1,400 @@
+ECONOMIC SIMULATION - ALGORITHM DOCUMENTATION
+===============================================
+
+This document describes the economic models and algorithms used in the
+economic-simulation.html file. The simulation models a generic western
+nation's macroeconomy on a quarterly time step, drawing on several
+well-established open-source economic frameworks.
+
+
+TABLE OF CONTENTS
+-----------------
+1. Overview and Time Step
+2. Solow Growth Model (Potential GDP)
+3. IS Curve (Aggregate Demand / Output Gap)
+4. Phillips Curve (Inflation)
+5. Okun's Law (Unemployment)
+6. Interest Rate Determination
+7. Business Inventory Cycle
+8. Government Revenue Model
+9. Government Expenditure Model
+10. Fiscal Balance and Debt Dynamics
+11. Stochastic Shocks and Random Events
+12. Initial Conditions
+13. Policy Levers
+14. References
+
+
+1. OVERVIEW AND TIME STEP
+=========================
+Each simulation turn represents one fiscal quarter. Statistics that are
+naturally annual (e.g., GDP growth rate) are annualized from the quarterly
+change for display purposes. The formula used is:
+
+    annualized_growth = ((GDP_t / GDP_{t-1}) - 1) * 400
+
+where the factor of 400 converts a quarterly ratio to an annualized
+percentage (multiply by 4 for quarters, by 100 for percent).
+
+
+2. SOLOW GROWTH MODEL (Potential GDP)
+=====================================
+Reference: Solow, R. (1956). "A Contribution to the Theory of Economic
+Growth." Quarterly Journal of Economics, 70(1), 65-94.
+
+Potential GDP represents the economy's maximum sustainable output given
+its resources. It grows each quarter according to three factors:
+
+    g_potential = labor_growth + capital_contribution + TFP_growth
+
+Implementation details:
+
+  a) Capital accumulation:
+     - Investment is fixed at 20% of real GDP (investment share).
+     - Capital depreciates at 2% per year (0.5% per quarter).
+     - K_t = K_{t-1} * (1 - 0.005) + (Investment / 4)
+
+  b) Labor growth contribution:
+     - Derived from population growth scaled by a labor elasticity of 0.6.
+     - labor_growth = (populationGrowthRate / 400) * 0.6
+
+  c) Total Factor Productivity (TFP):
+     - Baseline TFP growth is 0.5% per year (0.125% per quarter).
+     - A stochastic shock of magnitude +/-0.1% is added each quarter.
+
+  d) Capital contribution:
+     - capital_contrib = 0.3 * (quarterly_investment / capital_stock)
+     - The 0.3 coefficient represents capital's share of output in a
+       Cobb-Douglas production function (Y = A * K^0.3 * L^0.7).
+
+  e) Potential GDP update:
+     - potentialGDP_t = potentialGDP_{t-1} * (1 + labor_growth
+                        + capital_contrib + TFP_growth)
+
+
+3. IS CURVE (Aggregate Demand / Output Gap)
+===========================================
+Reference: Hicks, J. R. (1937). "Mr. Keynes and the Classics: A
+Suggested Interpretation." Econometrica, 5(2), 147-159.
+
+The IS curve determines the output gap, which is the percentage
+deviation of actual GDP from potential GDP. Three policy channels
+feed into the target output gap:
+
+  a) Fiscal stance:
+     fiscal_stance = (gov_spending_target - prev_expenditures) / prev_realGDP
+     - Measures the change in fiscal impulse relative to the economy.
+     - Multiplied by 0.5 (a fiscal multiplier).
+
+  b) Monetary stance:
+     monetary_stance = -(centralBankRate - 3.0) * 0.004
+     - The neutral rate is assumed to be 3.0%.
+     - Rates above neutral contract demand; below neutral expand it.
+
+  c) Tax drag:
+     tax_drag = -((incomeTaxRate - 25) * 0.002 + (exciseTaxRate - 10) * 0.001)
+     - Higher-than-baseline tax rates reduce aggregate demand.
+     - Income tax has a stronger drag coefficient than excise tax.
+
+  d) Output gap persistence:
+     outputGap_t = 0.7 * outputGap_{t-1} + 0.3 * outputGapTarget
+     - The output gap adjusts gradually (autoregressive parameter of 0.7).
+     - This captures the real-world inertia of economic cycles.
+
+  e) Actual GDP:
+     realGDP_t = potentialGDP_t * (1 + outputGap_t)
+
+
+4. PHILLIPS CURVE (Inflation)
+=============================
+Reference: Phillips, A. W. (1958). "The Relation between Unemployment
+and the Rate of Change of Money Wage Rates in the United Kingdom,
+1861-1957." Economica, 25(100), 283-299.
+
+Also: Friedman, M. (1968). "The Role of Monetary Policy." American
+Economic Review, 58(1), 1-17. (Expectations-augmented version.)
+
+The simulation uses a New Keynesian Phillips Curve with three components:
+
+    inflation_t = inertia + demand_pull + cost_push + expected_inflation
+
+  a) Inflation inertia:
+     inertia = 0.65 * inflation_{t-1}
+     - Past inflation feeds into current inflation (adaptive expectations).
+
+  b) Demand-pull inflation:
+     demand_pull = outputGap * 3.0
+     - A positive output gap (economy above potential) creates upward
+       pressure on prices. The coefficient of 3.0 means a 1% positive
+       output gap adds 3 percentage points to inflation.
+
+  c) Cost-push shocks:
+     cost_push = random_shock(magnitude = 0.15)
+     - Represents supply-side disturbances (oil prices, supply chain
+       disruptions, etc.).
+
+  d) Anchored inflation expectations:
+     expected_inflation = 2.0 * 0.2 = 0.4
+     - Long-run expectations are anchored at the 2% target.
+     - The weight of 0.2 reflects partial credibility of the central bank.
+
+  e) Floor: Inflation is bounded below at -2% (deflation limit).
+
+  f) Price level update:
+     priceLevel_t = priceLevel_{t-1} * (1 + inflation_t / 400)
+
+  g) Nominal GDP:
+     nominalGDP = realGDP * priceLevel / 100
+
+
+5. OKUN'S LAW (Unemployment)
+=============================
+Reference: Okun, A. M. (1962). "Potential GNP: Its Measurement and
+Significance." Proceedings of the Business and Economics Statistics
+Section, American Statistical Association, 98-104.
+
+Okun's Law links the output gap to the unemployment rate:
+
+    unemployment_t = NAIRU + okun_coefficient * (-outputGap) + shock
+
+  a) NAIRU (Non-Accelerating Inflation Rate of Unemployment):
+     - Set at 5.0%, representing the natural rate of unemployment.
+
+  b) Okun coefficient:
+     - Set at 2.0, meaning a 1% negative output gap raises unemployment
+       by 2 percentage points above NAIRU. This is consistent with
+       empirical estimates for western economies.
+
+  c) Stochastic component:
+     - A random shock of magnitude +/-0.15 percentage points.
+
+  d) Bounds:
+     - Unemployment is clamped between 1.5% and 25%.
+
+  e) Employment:
+     employed = laborForce * (1 - unemploymentRate / 100)
+
+
+6. INTEREST RATE DETERMINATION
+==============================
+Reference: Taylor, J. B. (1993). "Discretion versus Policy Rules in
+Practice." Carnegie-Rochester Conference Series on Public Policy,
+39, 195-214.
+
+The simulation models three interest rates:
+
+  a) Central bank policy rate:
+     - Directly set by the player via the "Central Bank Rate" slider.
+     - In a fully automated version this would follow the Taylor Rule:
+       i = r* + pi + 0.5*(pi - pi*) + 0.5*(y - y*)
+     - The player effectively acts as the central bank governor.
+
+  b) Home mortgage interest rate:
+     mortgage_rate = centralBankRate + credit_spread
+     credit_spread = 2.5 + (unemployment - 5.0) * 0.1 + shock(0.1)
+     - Base spread of 2.5% over the policy rate.
+     - Spread widens when unemployment is high (credit risk increases).
+     - Minimum mortgage rate is floored at 1.0%.
+
+  c) Commercial bank prime rate:
+     prime_rate = centralBankRate + 2.0 + shock(0.05)
+     - Standard 2% markup over the policy rate.
+     - Minimum prime rate is floored at 0.5%.
+
+
+7. BUSINESS INVENTORY CYCLE
+============================
+Reference: Blinder, A. S. & Maccini, L. J. (1991). "Taking Stock: A
+Critical Assessment of Recent Research on Inventories." Journal of
+Economic Perspectives, 5(1), 73-96.
+
+Business inventories adjust toward a target level proportional to GDP:
+
+    inventory_trend = realGDP * 0.15
+    adjustment = (inventory_trend - prev_inventories) * 0.15
+    inventories_t = prev_inventories + adjustment + shock(2)
+
+  - The target inventory-to-GDP ratio is 15%.
+  - Only 15% of the gap is closed each quarter (partial adjustment model).
+  - A stochastic shock of +/-2 billion is added.
+  - The "Change in Business Inventories" statistic reports:
+    delta_inventories = inventories_t - inventories_{t-1}
+
+
+8. GOVERNMENT REVENUE MODEL
+============================
+Total government revenue is the sum of three tax streams:
+
+  a) Income tax:
+     taxable_income = nominalGDP * 0.55
+     income_tax_revenue = taxable_income * (incomeTaxRate / 100)
+     - 55% of nominal GDP is treated as the taxable income base.
+     - The player controls the effective income tax rate (default 25%).
+
+  b) Capital gains tax:
+     asset_growth = 1 + (realGDPGrowth / 400) + (5 - centralBankRate) * 0.01
+                    + shock(0.02)
+     capital_gains_base = nominalGDP * 0.08 * max(0, asset_growth)
+     capital_gains_tax = capital_gains_base * (capitalGainsTaxRate / 100)
+     - Realized capital gains are modeled as 8% of nominal GDP, scaled
+       by an asset growth factor.
+     - Asset growth correlates positively with GDP growth and negatively
+       with interest rates (lower rates inflate asset prices).
+     - The player controls the capital gains tax rate (default 15%).
+
+  c) Excise tax:
+     consumption = nominalGDP * 0.60
+     excise_tax = consumption * (exciseTaxRate / 100)
+     - Consumption is assumed at 60% of nominal GDP.
+     - The player controls the excise tax rate (default 10%).
+
+  d) Total revenue:
+     govRevenues = income_tax + capital_gains_tax + excise_tax
+
+
+9. GOVERNMENT EXPENDITURE MODEL
+================================
+Government spending has three components:
+
+  a) Discretionary spending:
+     base_spending = govSpendingLevel / 4  (quarterly)
+     - The player sets the annual spending target (default 410 billion).
+
+  b) Automatic stabilizers:
+     auto_stabilizer = (unemploymentRate - NAIRU) * 3
+     - When unemployment exceeds the natural rate, spending automatically
+       increases (unemployment benefits, welfare payments, etc.).
+     - Each percentage point above NAIRU adds 3 billion per quarter.
+
+  c) Debt service:
+     debt_service = govDebt * (centralBankRate / 100) / 4
+     - Interest payments on outstanding government debt.
+     - Higher policy rates directly increase the government's borrowing cost.
+
+  d) Total quarterly expenditure:
+     quarterly_spending = base_spending + auto_stabilizer + debt_service
+     - Annualized (* 4) for display.
+
+
+10. FISCAL BALANCE AND DEBT DYNAMICS
+=====================================
+  a) Government surplus/deficit:
+     surplus = govRevenues - govExpenditures
+     - Positive values indicate a surplus; negative values a deficit.
+
+  b) Debt accumulation:
+     quarterly_deficit = (govExpenditures - govRevenues) / 4
+     govDebt_t = govDebt_{t-1} + quarterly_deficit
+     - Debt grows when the government runs a deficit.
+
+  c) Debt-to-GDP ratio:
+     debt_ratio = govDebt / nominalGDP * 100
+     - Displayed as a percentage; flagged as concerning above 80%.
+
+
+11. STOCHASTIC SHOCKS AND RANDOM EVENTS
+========================================
+The simulation includes two categories of randomness:
+
+  a) Continuous shocks:
+     The shock(magnitude) function returns a uniformly distributed random
+     value in the range [-magnitude, +magnitude]:
+       shock(m) = (Math.random() - 0.5) * 2 * m
+     These are applied to: population growth, TFP, output gap, inflation
+     (cost-push), unemployment, interest rate spreads, inventories, and
+     asset growth.
+
+  b) Discrete random events (checked each quarter):
+     - 4% chance: Trade disruption (reduces real GDP by 0.2%)
+     - 3% chance: Technology productivity boost (raises potential GDP by 0.1%)
+     - 2% chance: Consumer confidence surge (raises real GDP by 0.2%)
+     - Remaining quarters: "Steady economic conditions"
+
+  c) Threshold-triggered events:
+     - GDP growth < -1%: Contraction warning
+     - GDP growth > 5%: Rapid expansion notice
+     - Inflation > 5%: Elevated inflation warning
+     - Inflation < 0%: Deflation warning
+     - Unemployment > 8%: High unemployment alert
+     - Unemployment < 3%: Tight labor market notice
+     - Debt-to-GDP > 80%: Fiscal sustainability warning
+     - Mortgage rate changes > 0.5pp: Rate shift notice
+
+
+12. INITIAL CONDITIONS
+======================
+The simulation begins with conditions representative of a stable,
+mid-sized western economy:
+
+    Real GDP:               2,000 billion
+    Potential GDP:          2,000 billion (no output gap)
+    Price level:            100 (base index)
+    Population:             50 million
+    Labor force:            25 million (50% participation rate)
+    Employed:               23.75 million (5% unemployment)
+    Capital stock:          5,000 billion
+    Business inventories:   300 billion
+    Inflation rate:         2.0%
+    GDP growth rate:        2.5%
+    Unemployment rate:      5.0% (equal to NAIRU)
+    Central bank rate:      3.0%
+    Mortgage rate:          5.5%
+    Prime rate:             5.0%
+    Government revenues:    400 billion
+    Government expenditures:410 billion (slight deficit)
+    Government debt:        800 billion (40% of GDP)
+    Income tax rate:        25%
+    Capital gains tax rate: 15%
+    Excise tax rate:        10%
+
+
+13. POLICY LEVERS
+=================
+The player can adjust five policy instruments between quarters:
+
+  Lever                    Default   Range       Effect
+  ---------------------    -------   ---------   ---------------------------
+  Income Tax Rate          25%       5-50%       Higher rates increase revenue
+                                                 but create tax drag on demand
+  Capital Gains Tax Rate   15%       0-40%       Affects revenue from asset
+                                                 market activity
+  Excise Tax Rate          10%       0-25%       Consumption-based revenue;
+                                                 mild demand drag
+  Gov. Spending Target     410B      200-800B    Fiscal stimulus/austerity;
+                                                 feeds into the IS curve
+  Central Bank Rate        3.0%      0-12%       Primary monetary policy tool;
+                                                 affects mortgage/prime rates,
+                                                 debt service costs, and
+                                                 asset valuations
+
+
+14. REFERENCES
+==============
+The models used in this simulation are simplified implementations of
+well-established macroeconomic frameworks. Key academic references:
+
+- Solow, R. (1956). "A Contribution to the Theory of Economic Growth."
+  Quarterly Journal of Economics, 70(1), 65-94.
+
+- Hicks, J. R. (1937). "Mr. Keynes and the Classics: A Suggested
+  Interpretation." Econometrica, 5(2), 147-159.
+
+- Phillips, A. W. (1958). "The Relation between Unemployment and the
+  Rate of Change of Money Wage Rates in the United Kingdom, 1861-1957."
+  Economica, 25(100), 283-299.
+
+- Okun, A. M. (1962). "Potential GNP: Its Measurement and Significance."
+  Proceedings of the Business and Economics Statistics Section, ASA.
+
+- Taylor, J. B. (1993). "Discretion versus Policy Rules in Practice."
+  Carnegie-Rochester Conference Series on Public Policy, 39, 195-214.
+
+- Friedman, M. (1968). "The Role of Monetary Policy." American Economic
+  Review, 58(1), 1-17.
+
+- Blinder, A. S. & Maccini, L. J. (1991). "Taking Stock: A Critical
+  Assessment of Recent Research on Inventories." Journal of Economic
+  Perspectives, 5(1), 73-96.
+
+- Blanchard, O. & Johnson, D. (2013). "Macroeconomics." 6th Edition,
+  Pearson. (General textbook reference for IS-LM and Phillips Curve.)
