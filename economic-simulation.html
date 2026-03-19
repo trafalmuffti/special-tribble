@@ -357,11 +357,16 @@ function simulate() {
   // 6. Interest rates
   //    Taylor Rule for central bank (descriptive, player sets target)
   S.centralBankRate = S.centralBankTarget;
-  //    Mortgage = CB rate + credit spread (~2.5%)
-  const creditSpread = 2.5 + (S.unemploymentRate - 5) * 0.1 + shock(0.1);
+  //    Sovereign risk premium: debt-to-GDP ratio pushes up all market rates
+  //    Neutral at 40% debt/GDP; each 10pp above adds ~0.15% to spreads
+  //    Negative debt (sovereign wealth) gives a small rate discount
+  const debtToGDP = S.govDebt / S.nominalGDP;
+  const sovereignRiskPremium = Math.max(-0.5, (debtToGDP - 0.40) * 1.5);
+  //    Mortgage = CB rate + credit spread (~2.5%) + sovereign risk
+  const creditSpread = 2.5 + (S.unemploymentRate - 5) * 0.1 + sovereignRiskPremium + shock(0.1);
   S.mortgageRate = Math.max(1.0, S.centralBankRate + creditSpread);
-  //    Prime = CB rate + 2%
-  S.primeRate = Math.max(0.5, S.centralBankRate + 2.0 + shock(0.05));
+  //    Prime = CB rate + 2% + sovereign risk
+  S.primeRate = Math.max(0.5, S.centralBankRate + 2.0 + sovereignRiskPremium + shock(0.05));
 
   // 7. Business inventories
   S.prevBusinessInventories = prev.businessInventories;
@@ -426,7 +431,9 @@ function generateEvents(prev) {
   if (S.unemploymentRate > 8) events.push('Unemployment rises to concerning levels.');
   else if (S.unemploymentRate < 3) events.push('Labor market extremely tight.');
 
-  if (S.govDebt / S.nominalGDP > 0.8) events.push('Government debt-to-GDP ratio exceeds 80%.');
+  if (S.govDebt / S.nominalGDP > 0.8) events.push('Government debt-to-GDP ratio exceeds 80%. Sovereign risk premium rising.');
+  if (S.govDebt < 0 && prev.govDebt >= 0) events.push('Government has paid off all debt and now holds sovereign wealth!');
+  if (S.govDebt / S.nominalGDP > 1.0) events.push('Debt exceeds 100% of GDP. Bond markets under strain.');
 
   if (Math.abs(S.mortgageRate - prev.mortgageRate) > 0.5)
     events.push(`Mortgage rates shift significantly to ${S.mortgageRate.toFixed(1)}%.`);
@@ -476,12 +483,21 @@ function renderCards() {
     { title: 'Real GDP Level',            value: fmtB(S.realGDP),                   cls: 'neutral' },
   ];
 
+  const deficit = S.govExpenditures - S.govRevenues;
+  const debtLabel = S.govDebt < 0 ? 'Sovereign Wealth' : 'Government Debt';
+  const debtDisplay = S.govDebt < 0 ? fmtB(Math.abs(S.govDebt)) : fmtB(S.govDebt);
+  const debtCls = S.govDebt < 0 ? 'positive' : S.govDebt / S.nominalGDP > 0.8 ? 'negative' : 'neutral';
+  const ratioLabel = S.govDebt < 0 ? 'Sovereign Wealth-to-GDP' : 'Debt-to-GDP Ratio';
+  const ratioValue = Math.abs(S.govDebt / S.nominalGDP * 100);
+  const ratioCls = S.govDebt < 0 ? 'positive' : ratioValue > 80 ? 'negative' : 'neutral';
+
   const govFinance = [
     { title: 'Government Surplus / Deficit', value: (surplus >= 0 ? '+' : '') + fmtB(surplus), cls: changeClass(surplus) },
+    { title: 'Current Deficit',              value: deficit > 0 ? fmtB(deficit) : 'None (Surplus)', cls: deficit > 0 ? 'negative' : 'positive' },
     { title: 'Government Revenues',          value: fmtB(S.govRevenues),             cls: 'neutral' },
     { title: 'Government Expenditures',      value: fmtB(S.govExpenditures),         cls: 'neutral' },
-    { title: 'Government Debt',              value: fmtB(S.govDebt),                 cls: 'neutral' },
-    { title: 'Debt-to-GDP Ratio',            value: fmt(S.govDebt / S.nominalGDP * 100) + '%', cls: S.govDebt / S.nominalGDP > 0.8 ? 'negative' : 'neutral' },
+    { title: debtLabel,                      value: debtDisplay,                      cls: debtCls },
+    { title: ratioLabel,                     value: fmt(ratioValue) + '%',            cls: ratioCls },
   ];
 
   const taxCards = [

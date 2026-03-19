@@ -181,24 +181,40 @@ Reference: Taylor, J. B. (1993). "Discretion versus Policy Rules in
 Practice." Carnegie-Rochester Conference Series on Public Policy,
 39, 195-214.
 
-The simulation models three interest rates:
+The simulation models three interest rates, all influenced by a
+sovereign risk premium linked to the government's debt-to-GDP ratio:
 
-  a) Central bank policy rate:
+  a) Sovereign risk premium:
+     debtToGDP = govDebt / nominalGDP
+     sovereignRiskPremium = max(-0.5, (debtToGDP - 0.40) * 1.5)
+     - The premium is zero when debt-to-GDP is at the 40% baseline.
+     - Each 10 percentage points of debt above 40% adds approximately
+       0.15% to all market interest rate spreads.
+     - When the government holds sovereign wealth (negative debt), the
+       premium becomes negative (down to -0.5%), lowering market rates
+       as a reward for fiscal strength.
+     - This creates a feedback loop: high debt raises rates, which
+       increases debt service costs, which worsens the deficit.
+
+  b) Central bank policy rate:
      - Directly set by the player via the "Central Bank Rate" slider.
      - In a fully automated version this would follow the Taylor Rule:
        i = r* + pi + 0.5*(pi - pi*) + 0.5*(y - y*)
      - The player effectively acts as the central bank governor.
 
-  b) Home mortgage interest rate:
+  c) Home mortgage interest rate:
      mortgage_rate = centralBankRate + credit_spread
-     credit_spread = 2.5 + (unemployment - 5.0) * 0.1 + shock(0.1)
+     credit_spread = 2.5 + (unemployment - 5.0) * 0.1
+                     + sovereignRiskPremium + shock(0.1)
      - Base spread of 2.5% over the policy rate.
      - Spread widens when unemployment is high (credit risk increases).
+     - Spread widens further with high sovereign debt (country risk).
      - Minimum mortgage rate is floored at 1.0%.
 
-  c) Commercial bank prime rate:
-     prime_rate = centralBankRate + 2.0 + shock(0.05)
+  d) Commercial bank prime rate:
+     prime_rate = centralBankRate + 2.0 + sovereignRiskPremium + shock(0.05)
      - Standard 2% markup over the policy rate.
+     - Also includes the sovereign risk premium from government debt.
      - Minimum prime rate is floored at 0.5%.
 
 
@@ -282,14 +298,39 @@ Government spending has three components:
      surplus = govRevenues - govExpenditures
      - Positive values indicate a surplus; negative values a deficit.
 
-  b) Debt accumulation:
+  b) Current deficit:
+     deficit = govExpenditures - govRevenues
+     - Displayed explicitly on the dashboard. Shows the deficit amount
+       when spending exceeds revenue, or "None (Surplus)" otherwise.
+
+  c) Debt accumulation:
      quarterly_deficit = (govExpenditures - govRevenues) / 4
      govDebt_t = govDebt_{t-1} + quarterly_deficit
      - Debt grows when the government runs a deficit.
+     - Debt shrinks when the government runs a surplus.
 
-  c) Debt-to-GDP ratio:
-     debt_ratio = govDebt / nominalGDP * 100
+  d) Sovereign wealth:
+     - When government debt crosses below zero (i.e., cumulative
+       surpluses have exceeded all prior debt), the balance is
+       relabeled as "Sovereign Wealth" in the dashboard.
+     - The debt-to-GDP ratio card becomes "Sovereign Wealth-to-GDP".
+     - This reflects the real-world concept of sovereign wealth funds
+       (e.g., Norway's Government Pension Fund).
+     - Sovereign wealth provides a rate discount: the sovereign risk
+       premium turns negative (see Section 6a), reducing mortgage
+       and prime rates below their baseline spreads.
+
+  e) Debt-to-GDP ratio:
+     debt_ratio = |govDebt / nominalGDP| * 100
      - Displayed as a percentage; flagged as concerning above 80%.
+     - When debt is negative, displays as "Sovereign Wealth-to-GDP".
+
+  f) Debt-interest feedback loop:
+     - High debt raises the sovereign risk premium (Section 6a).
+     - Higher market rates increase debt service costs (Section 9c).
+     - Higher debt service worsens the deficit, further increasing debt.
+     - This creates a potentially destabilizing positive feedback loop,
+       consistent with real-world sovereign debt crisis dynamics.
 
 
 11. STOCHASTIC SHOCKS AND RANDOM EVENTS
