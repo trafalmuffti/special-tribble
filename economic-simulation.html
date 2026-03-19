@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Economic Simulation</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0f1923;
+    color: #e0e6ed;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 1.6rem;
+    margin-bottom: 6px;
+    color: #5bc0eb;
+    letter-spacing: 1px;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 0.85rem;
+    color: #7a8a9a;
+    margin-bottom: 18px;
+  }
+  .controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .controls .info {
+    font-size: 0.95rem;
+    color: #a0b0c0;
+  }
+  .controls .info span {
+    color: #5bc0eb;
+    font-weight: 600;
+  }
+  button {
+    background: linear-gradient(135deg, #1a73e8, #0d5bbd);
+    color: #fff;
+    border: none;
+    padding: 10px 28px;
+    font-size: 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    font-weight: 600;
+  }
+  button:hover { background: linear-gradient(135deg, #2180f0, #1a73e8); transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  button.secondary {
+    background: linear-gradient(135deg, #3a4a5a, #2a3a4a);
+    font-size: 0.85rem;
+    padding: 8px 18px;
+  }
+  button.secondary:hover { background: linear-gradient(135deg, #4a5a6a, #3a4a5a); }
+  .dashboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
+    max-width: 1400px;
+    margin: 0 auto 24px;
+  }
+  .card {
+    background: #1a2733;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    padding: 14px 18px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #3a5a7a; }
+  .card-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: #6a8a9a;
+    margin-bottom: 6px;
+  }
+  .card-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .card-change {
+    font-size: 0.8rem;
+    color: #7a8a9a;
+  }
+  .positive { color: #2ecc71; }
+  .negative { color: #e74c3c; }
+  .neutral { color: #f39c12; }
+  .section-header {
+    max-width: 1400px;
+    margin: 0 auto 10px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #4a6a7a;
+    border-bottom: 1px solid #2a3a4a;
+    padding-bottom: 4px;
+  }
+  .chart-area {
+    max-width: 1400px;
+    margin: 0 auto 20px;
+    background: #1a2733;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    padding: 18px;
+  }
+  .chart-area h3 {
+    font-size: 0.85rem;
+    color: #6a8a9a;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  canvas { width: 100%; height: 200px; }
+  .policy-area {
+    max-width: 1400px;
+    margin: 0 auto 20px;
+    background: #1a2733;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    padding: 18px;
+  }
+  .policy-area h3 {
+    font-size: 0.85rem;
+    color: #6a8a9a;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .policy-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .policy-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .policy-item label {
+    font-size: 0.8rem;
+    color: #8a9aaa;
+  }
+  .policy-item .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .policy-item input[type="range"] {
+    flex: 1;
+    accent-color: #1a73e8;
+    height: 6px;
+  }
+  .policy-item .slider-val {
+    font-size: 0.9rem;
+    font-weight: 600;
+    min-width: 55px;
+    text-align: right;
+    color: #5bc0eb;
+  }
+  .event-log {
+    max-width: 1400px;
+    margin: 0 auto 20px;
+    background: #1a2733;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    padding: 14px 18px;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+  .event-log h3 {
+    font-size: 0.85rem;
+    color: #6a8a9a;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .event-log p {
+    font-size: 0.8rem;
+    color: #8a9aaa;
+    margin-bottom: 3px;
+    padding-left: 8px;
+    border-left: 2px solid #2a3a4a;
+  }
+  .event-log p .turn-label { color: #5bc0eb; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Economic Simulation</h1>
+<p class="subtitle">Generic Western Nation &mdash; IS-LM / Phillips Curve / Solow Growth Model</p>
+
+<div class="controls">
+  <div class="info">Year: <span id="year">1</span></div>
+  <div class="info">Quarter: <span id="quarter">Q1</span></div>
+  <button id="btn-advance" onclick="advanceTurn()">Advance Quarter &rarr;</button>
+  <button class="secondary" onclick="advanceYear()">Advance Year &rarr;&rarr;</button>
+  <button class="secondary" onclick="resetSim()">Reset</button>
+</div>
+
+<div class="section-header">Key Indicators</div>
+<div class="dashboard" id="indicators"></div>
+
+<div class="section-header">Government Finance</div>
+<div class="dashboard" id="gov-finance"></div>
+
+<div class="section-header">Tax Revenue Breakdown</div>
+<div class="dashboard" id="tax-cards"></div>
+
+<div class="policy-area">
+  <h3>Policy Levers</h3>
+  <div class="policy-grid" id="policy-controls"></div>
+</div>
+
+<div class="chart-area">
+  <h3>GDP &amp; Inflation History</h3>
+  <canvas id="chart-main"></canvas>
+</div>
+
+<div class="event-log">
+  <h3>Event Log</h3>
+  <div id="log-entries"></div>
+</div>
+
+<script>
+// ============================================================
+//  ECONOMIC SIMULATION ENGINE
+//  Based on simplified IS-LM, Phillips Curve, Okun's Law,
+//  Solow growth, and Taylor Rule frameworks.
+// ============================================================
+
+// --- State ---
+let turn = 0;
+const history = { gdpGrowth: [], inflation: [], unemployment: [], mortgageRate: [], primeRate: [] };
+
+function defaultState() {
+  return {
+    // Real economy (billions, national currency)
+    realGDP: 2000,
+    potentialGDP: 2000,
+    nominalGDP: 2000,
+    priceLevel: 100,
+    population: 50,          // millions
+    laborForce: 25,           // millions
+    employed: 23.75,          // millions
+    capitalStock: 5000,
+    businessInventories: 300,
+    prevBusinessInventories: 300,
+
+    // Rates (percent)
+    inflationRate: 2.0,
+    realGDPGrowth: 2.5,
+    unemploymentRate: 5.0,
+    populationGrowthRate: 0.8,
+    naturalUnemployment: 5.0,  // NAIRU
+
+    // Interest rates
+    centralBankRate: 3.0,
+    mortgageRate: 5.5,
+    primeRate: 5.0,
+
+    // Government (billions)
+    govRevenues: 400,
+    govExpenditures: 410,
+    govDebt: 800,
+
+    // Tax revenues (billions)
+    incomeTaxRevenue: 250,
+    capitalGainsTaxRevenue: 50,
+    exciseTaxRevenue: 100,
+
+    // Policy levers (rates in %)
+    incomeTaxRate: 25,
+    capitalGainsTaxRate: 15,
+    exciseTaxRate: 10,
+    govSpendingLevel: 410,    // billions target
+    centralBankTarget: 3.0,   // policy rate %
+  };
+}
+
+let S = defaultState();
+
+// --- Policy definitions ---
+const policies = [
+  { key: 'incomeTaxRate',     label: 'Income Tax Rate',         min: 5,   max: 50,  step: 1,   unit: '%' },
+  { key: 'capitalGainsTaxRate', label: 'Capital Gains Tax Rate', min: 0,   max: 40,  step: 1,   unit: '%' },
+  { key: 'exciseTaxRate',     label: 'Excise Tax Rate',         min: 0,   max: 25,  step: 1,   unit: '%' },
+  { key: 'govSpendingLevel',  label: 'Gov. Spending Target (B)', min: 200, max: 800, step: 10,  unit: 'B' },
+  { key: 'centralBankTarget', label: 'Central Bank Rate',       min: 0,   max: 12,  step: 0.25, unit: '%' },
+];
+
+// --- Random shocks ---
+function shock(magnitude) {
+  return (Math.random() - 0.5) * 2 * magnitude;
+}
+
+// --- Simulation step (one quarter) ---
+function simulate() {
+  const prev = { ...S };
+  turn++;
+
+  // 1. Population growth (quarterly)
+  const qPopGrowth = S.populationGrowthRate / 4 / 100;
+  S.population *= (1 + qPopGrowth + shock(0.0005));
+  S.laborForce = S.population * 0.50; // participation rate ~50%
+
+  // 2. Potential GDP growth (Solow-style)
+  //    g_potential = labor_growth + capital_deepening + TFP
+  const depreciation = 0.02 / 4;
+  const investment = S.realGDP * 0.20; // ~20% investment share
+  S.capitalStock = S.capitalStock * (1 - depreciation) + investment / 4;
+  const tfpGrowth = 0.005 / 4 + shock(0.001); // ~0.5% annual TFP
+  const laborGrowth = qPopGrowth * 0.6; // labor contribution
+  const capitalContrib = 0.3 * (investment / 4) / S.capitalStock;
+  S.potentialGDP *= (1 + laborGrowth + capitalContrib + tfpGrowth);
+
+  // 3. IS curve: output gap responds to fiscal & monetary policy
+  const fiscalStance = (S.govSpendingLevel - prev.govExpenditures) / prev.realGDP;
+  const monetaryStance = -(S.centralBankTarget - 3.0) * 0.004; // tighter = lower output
+  const taxDrag = -((S.incomeTaxRate - 25) * 0.002 + (S.exciseTaxRate - 10) * 0.001);
+  const outputGapTarget = fiscalStance * 0.5 + monetaryStance + taxDrag + shock(0.003);
+
+  const prevOutputGap = (prev.realGDP - prev.potentialGDP) / prev.potentialGDP;
+  const outputGap = prevOutputGap * 0.7 + outputGapTarget * 0.3;
+
+  S.realGDP = S.potentialGDP * (1 + outputGap);
+  S.realGDPGrowth = ((S.realGDP / prev.realGDP) - 1) * 400; // annualized quarterly
+
+  // 4. Phillips Curve: inflation
+  const inflationInertia = prev.inflationRate * 0.65;
+  const demandPull = outputGap * 3.0;
+  const costPush = shock(0.15);
+  const expectedInflation = 2.0 * 0.2; // anchored expectations
+  S.inflationRate = Math.max(-2, inflationInertia + demandPull + costPush + expectedInflation);
+
+  // Update price level
+  S.priceLevel *= (1 + S.inflationRate / 400);
+  S.nominalGDP = S.realGDP * S.priceLevel / 100;
+
+  // 5. Okun's Law: unemployment
+  //    1% below potential => ~2% above natural unemployment
+  const okun = -outputGap * 2.0;
+  S.unemploymentRate = Math.max(1.5, Math.min(25,
+    S.naturalUnemployment + okun + shock(0.15)
+  ));
+  S.employed = S.laborForce * (1 - S.unemploymentRate / 100);
+
+  // 6. Interest rates
+  //    Taylor Rule for central bank (descriptive, player sets target)
+  S.centralBankRate = S.centralBankTarget;
+  //    Mortgage = CB rate + credit spread (~2.5%)
+  const creditSpread = 2.5 + (S.unemploymentRate - 5) * 0.1 + shock(0.1);
+  S.mortgageRate = Math.max(1.0, S.centralBankRate + creditSpread);
+  //    Prime = CB rate + 2%
+  S.primeRate = Math.max(0.5, S.centralBankRate + 2.0 + shock(0.05));
+
+  // 7. Business inventories
+  S.prevBusinessInventories = prev.businessInventories;
+  const inventoryTrend = S.realGDP * 0.15;
+  const inventoryAdjust = (inventoryTrend - prev.businessInventories) * 0.15;
+  S.businessInventories = prev.businessInventories + inventoryAdjust + shock(2);
+
+  // 8. Government revenues
+  //    Income tax: progressive on nominal GDP
+  const taxableIncome = S.nominalGDP * 0.55;
+  S.incomeTaxRevenue = taxableIncome * (S.incomeTaxRate / 100);
+
+  //    Capital gains: linked to asset prices (correlated with GDP growth & low rates)
+  const assetGrowth = 1 + (S.realGDPGrowth / 400) + (5 - S.centralBankRate) * 0.01 + shock(0.02);
+  const capitalGainsBase = S.nominalGDP * 0.08 * Math.max(0, assetGrowth);
+  S.capitalGainsTaxRevenue = capitalGainsBase * (S.capitalGainsTaxRate / 100);
+
+  //    Excise tax: on consumption (~60% of GDP)
+  const consumption = S.nominalGDP * 0.60;
+  S.exciseTaxRevenue = consumption * (S.exciseTaxRate / 100);
+
+  S.govRevenues = S.incomeTaxRevenue + S.capitalGainsTaxRevenue + S.exciseTaxRevenue;
+
+  // 9. Government expenditures
+  //    Automatic stabilizers: spending rises with unemployment
+  const autoStabilizer = (S.unemploymentRate - S.naturalUnemployment) * 3;
+  const debtService = S.govDebt * (S.centralBankRate / 100) / 4;
+  S.govExpenditures = S.govSpendingLevel / 4 + autoStabilizer + debtService;
+  // Annualize for display
+  S.govExpenditures *= 4;
+  S.govRevenues = S.govRevenues; // already annual-ish approximation
+
+  // Government debt
+  const deficit = (S.govExpenditures - S.govRevenues) / 4;
+  S.govDebt += deficit;
+
+  // Record history
+  history.gdpGrowth.push(S.realGDPGrowth);
+  history.inflation.push(S.inflationRate);
+  history.unemployment.push(S.unemploymentRate);
+  history.mortgageRate.push(S.mortgageRate);
+  history.primeRate.push(S.primeRate);
+
+  // Events
+  generateEvents(prev);
+}
+
+// --- Events ---
+const eventLog = [];
+function generateEvents(prev) {
+  const yr = Math.floor((turn - 1) / 4) + 1;
+  const q = 'Q' + (((turn - 1) % 4) + 1);
+  const tag = `Y${yr} ${q}`;
+  const events = [];
+
+  if (S.realGDPGrowth < -1) events.push('Economy enters contraction territory.');
+  else if (S.realGDPGrowth > 5) events.push('Economy experiencing rapid expansion.');
+
+  if (S.inflationRate > 5) events.push('Elevated inflation pressures building.');
+  else if (S.inflationRate < 0) events.push('Deflationary conditions emerging.');
+
+  if (S.unemploymentRate > 8) events.push('Unemployment rises to concerning levels.');
+  else if (S.unemploymentRate < 3) events.push('Labor market extremely tight.');
+
+  if (S.govDebt / S.nominalGDP > 0.8) events.push('Government debt-to-GDP ratio exceeds 80%.');
+
+  if (Math.abs(S.mortgageRate - prev.mortgageRate) > 0.5)
+    events.push(`Mortgage rates shift significantly to ${S.mortgageRate.toFixed(1)}%.`);
+
+  // Random events
+  const r = Math.random();
+  if (r < 0.04) {
+    events.push('Trade disruption impacts exports.');
+    S.realGDP *= 0.998;
+  } else if (r < 0.07) {
+    events.push('Technology sector reports strong productivity gains.');
+    S.potentialGDP *= 1.001;
+  } else if (r < 0.09) {
+    events.push('Consumer confidence index rises sharply.');
+    S.realGDP *= 1.002;
+  }
+
+  if (events.length === 0) events.push('Steady economic conditions this quarter.');
+
+  events.forEach(e => eventLog.unshift({ tag, text: e }));
+  if (eventLog.length > 40) eventLog.length = 40;
+}
+
+// --- Rendering ---
+function fmt(v, decimals = 1) { return v.toFixed(decimals); }
+function fmtB(v) { return v.toFixed(1) + 'B'; }
+function fmtPct(v) { return v.toFixed(2) + '%'; }
+
+function changeClass(v, invert = false) {
+  if (Math.abs(v) < 0.05) return 'neutral';
+  const pos = invert ? v < 0 : v > 0;
+  return pos ? 'positive' : 'negative';
+}
+
+function renderCards() {
+  const surplus = S.govRevenues - S.govExpenditures;
+  const invChange = S.businessInventories - S.prevBusinessInventories;
+
+  const indicators = [
+    { title: 'Real GDP Growth (ann.)',     value: fmtPct(S.realGDPGrowth),          cls: changeClass(S.realGDPGrowth) },
+    { title: 'Inflation Rate',            value: fmtPct(S.inflationRate),           cls: S.inflationRate > 4 || S.inflationRate < 0 ? 'negative' : S.inflationRate > 3 ? 'neutral' : 'positive' },
+    { title: 'Unemployment Rate',         value: fmtPct(S.unemploymentRate),        cls: S.unemploymentRate > 7 ? 'negative' : S.unemploymentRate > 5.5 ? 'neutral' : 'positive' },
+    { title: 'Population Growth Rate',    value: fmtPct(S.populationGrowthRate),    cls: 'neutral' },
+    { title: 'Mortgage Interest Rate',    value: fmtPct(S.mortgageRate),            cls: 'neutral' },
+    { title: 'Commercial Bank Prime Rate', value: fmtPct(S.primeRate),              cls: 'neutral' },
+    { title: 'Change in Business Inventories', value: (invChange >= 0 ? '+' : '') + fmtB(invChange), cls: changeClass(invChange) },
+    { title: 'Real GDP Level',            value: fmtB(S.realGDP),                   cls: 'neutral' },
+  ];
+
+  const govFinance = [
+    { title: 'Government Surplus / Deficit', value: (surplus >= 0 ? '+' : '') + fmtB(surplus), cls: changeClass(surplus) },
+    { title: 'Government Revenues',          value: fmtB(S.govRevenues),             cls: 'neutral' },
+    { title: 'Government Expenditures',      value: fmtB(S.govExpenditures),         cls: 'neutral' },
+    { title: 'Government Debt',              value: fmtB(S.govDebt),                 cls: 'neutral' },
+    { title: 'Debt-to-GDP Ratio',            value: fmt(S.govDebt / S.nominalGDP * 100) + '%', cls: S.govDebt / S.nominalGDP > 0.8 ? 'negative' : 'neutral' },
+  ];
+
+  const taxCards = [
+    { title: 'Income Tax Revenue',        value: fmtB(S.incomeTaxRevenue),    cls: 'neutral' },
+    { title: 'Capital Gains Tax Revenue', value: fmtB(S.capitalGainsTaxRevenue), cls: 'neutral' },
+    { title: 'Excise Tax Revenue',        value: fmtB(S.exciseTaxRevenue),    cls: 'neutral' },
+  ];
+
+  renderCardGroup('indicators', indicators);
+  renderCardGroup('gov-finance', govFinance);
+  renderCardGroup('tax-cards', taxCards);
+}
+
+function renderCardGroup(id, items) {
+  const el = document.getElementById(id);
+  el.innerHTML = items.map(c => `
+    <div class="card">
+      <div class="card-title">${c.title}</div>
+      <div class="card-value ${c.cls}">${c.value}</div>
+    </div>
+  `).join('');
+}
+
+function renderPolicies() {
+  const el = document.getElementById('policy-controls');
+  el.innerHTML = policies.map(p => `
+    <div class="policy-item">
+      <label>${p.label}</label>
+      <div class="slider-row">
+        <input type="range" min="${p.min}" max="${p.max}" step="${p.step}"
+               value="${S[p.key]}"
+               oninput="updatePolicy('${p.key}', this.value, '${p.unit}', this)">
+        <span class="slider-val" id="pv-${p.key}">${fmt(S[p.key], p.step < 1 ? 2 : 0)}${p.unit}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function updatePolicy(key, val, unit, input) {
+  S[key] = parseFloat(val);
+  const decimals = parseFloat(input.step) < 1 ? 2 : 0;
+  document.getElementById('pv-' + key).textContent = parseFloat(val).toFixed(decimals) + unit;
+}
+
+function renderLog() {
+  const el = document.getElementById('log-entries');
+  el.innerHTML = eventLog.map(e =>
+    `<p><span class="turn-label">[${e.tag}]</span> ${e.text}</p>`
+  ).join('');
+}
+
+function renderTurnInfo() {
+  const yr = Math.floor((turn - 1) / 4) + 1;
+  const q = ((turn - 1) % 4) + 1;
+  document.getElementById('year').textContent = yr;
+  document.getElementById('quarter').textContent = 'Q' + q;
+}
+
+// --- Chart (minimal canvas sparklines) ---
+function renderChart() {
+  const canvas = document.getElementById('chart-main');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 200 * dpr;
+  canvas.style.height = '200px';
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = 200;
+
+  ctx.fillStyle = '#1a2733';
+  ctx.fillRect(0, 0, W, H);
+
+  if (history.gdpGrowth.length < 2) {
+    ctx.fillStyle = '#4a5a6a';
+    ctx.font = '13px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('Chart will appear after 2 quarters', W / 2, H / 2);
+    return;
+  }
+
+  const series = [
+    { data: history.gdpGrowth,   color: '#2ecc71', label: 'GDP Growth' },
+    { data: history.inflation,   color: '#e74c3c', label: 'Inflation' },
+    { data: history.unemployment, color: '#f39c12', label: 'Unemployment' },
+  ];
+
+  // Compute global min/max
+  let gMin = Infinity, gMax = -Infinity;
+  series.forEach(s => s.data.forEach(v => { if (v < gMin) gMin = v; if (v > gMax) gMax = v; }));
+  const range = Math.max(gMax - gMin, 1);
+  const pad = 25;
+
+  // Grid
+  ctx.strokeStyle = '#2a3a4a';
+  ctx.lineWidth = 0.5;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad + (H - 2 * pad) * i / 4;
+    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W - 10, y); ctx.stroke();
+    ctx.fillStyle = '#4a5a6a';
+    ctx.font = '10px system-ui';
+    ctx.textAlign = 'right';
+    ctx.fillText(fmt(gMax - (range * i / 4), 1) + '%', pad - 4, y + 3);
+  }
+
+  // Zero line
+  if (gMin < 0 && gMax > 0) {
+    const zeroY = pad + (H - 2 * pad) * (gMax / range);
+    ctx.strokeStyle = '#4a5a6a';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(pad, zeroY); ctx.lineTo(W - 10, zeroY); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Lines
+  const n = history.gdpGrowth.length;
+  const xStep = (W - pad - 10) / Math.max(n - 1, 1);
+
+  series.forEach(s => {
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    s.data.forEach((v, i) => {
+      const x = pad + i * xStep;
+      const y = pad + (H - 2 * pad) * (1 - (v - gMin) / range);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  // Legend
+  let lx = pad + 5;
+  ctx.font = '11px system-ui';
+  series.forEach(s => {
+    ctx.fillStyle = s.color;
+    ctx.fillRect(lx, H - 14, 12, 3);
+    ctx.fillStyle = '#8a9aaa';
+    ctx.textAlign = 'left';
+    ctx.fillText(s.label, lx + 16, H - 8);
+    lx += ctx.measureText(s.label).width + 32;
+  });
+}
+
+// --- Advance ---
+function advanceTurn() {
+  simulate();
+  render();
+}
+
+function advanceYear() {
+  for (let i = 0; i < 4; i++) simulate();
+  render();
+}
+
+function resetSim() {
+  turn = 0;
+  S = defaultState();
+  history.gdpGrowth.length = 0;
+  history.inflation.length = 0;
+  history.unemployment.length = 0;
+  history.mortgageRate.length = 0;
+  history.primeRate.length = 0;
+  eventLog.length = 0;
+  render();
+}
+
+function render() {
+  renderTurnInfo();
+  renderCards();
+  renderPolicies();
+  renderChart();
+  renderLog();
+}
+
+// --- Init ---
+window.addEventListener('resize', renderChart);
+// Run one initial quarter so there's data
+simulate();
+render();
+</script>
+</body>
+</html>
