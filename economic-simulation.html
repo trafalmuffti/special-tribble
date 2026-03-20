@@ -303,101 +303,184 @@ function shock(magnitude) {
   return (Math.random() - 0.5) * 2 * magnitude;
 }
 
+// --- Utility: clamp ---
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
 // --- Simulation step (one quarter) ---
+// All core relationships use polynomial (quadratic/cubic) forms to
+// capture non-linear dynamics: diminishing returns, accelerating risk,
+// asymmetric responses, and threshold effects.
 function simulate() {
   const prev = { ...S };
   turn++;
 
   // 1. Population growth (quarterly)
-  const qPopGrowth = S.populationGrowthRate / 4 / 100;
+  //    Logistic-style: growth slows as population approaches carrying capacity
+  //    P' = r * P * (1 - P/K)  discretized per quarter
+  const carryingCapacity = 120; // millions
+  const basePopRate = S.populationGrowthRate / 100;
+  const logisticFactor = 1 - Math.pow(S.population / carryingCapacity, 1.5);
+  const qPopGrowth = (basePopRate / 4) * Math.max(0.1, logisticFactor);
   S.population *= (1 + qPopGrowth + shock(0.0005));
-  S.laborForce = S.population * 0.50; // participation rate ~50%
+  // Labor force participation: polynomial in population density
+  //   Participation peaks at mid-range population, slight decline at extremes
+  const popRatio = S.population / carryingCapacity;
+  const participation = 0.50 + 0.04 * popRatio - 0.08 * popRatio * popRatio;
+  S.laborForce = S.population * clamp(participation, 0.42, 0.55);
 
-  // 2. Potential GDP growth (Solow-style)
-  //    g_potential = labor_growth + capital_deepening + TFP
+  // 2. Potential GDP growth (Solow-style with diminishing returns)
+  //    Cobb-Douglas: Y = A * K^alpha * L^(1-alpha)
+  //    Capital contribution uses diminishing marginal returns (concave)
   const depreciation = 0.02 / 4;
-  const investment = S.realGDP * 0.20; // ~20% investment share
+  const investment = S.realGDP * 0.20;
   S.capitalStock = S.capitalStock * (1 - depreciation) + investment / 4;
-  const tfpGrowth = 0.005 / 4 + shock(0.001); // ~0.5% annual TFP
-  const laborGrowth = qPopGrowth * 0.6; // labor contribution
-  const capitalContrib = 0.3 * (investment / 4) / S.capitalStock;
+  const tfpGrowth = 0.005 / 4 + shock(0.001);
+  const laborGrowth = qPopGrowth * 0.6;
+  //    Diminishing returns to capital: cubic polynomial
+  //    capitalContrib = a1*x - a2*x^2 + a3*x^3  where x = I/K
+  const ik = (investment / 4) / S.capitalStock;
+  const capitalContrib = 0.45 * ik - 1.2 * ik * ik + 1.0 * ik * ik * ik;
   S.potentialGDP *= (1 + laborGrowth + capitalContrib + tfpGrowth);
 
-  // 3. IS curve: output gap responds to fiscal & monetary policy
-  const fiscalStance = (S.govSpendingLevel - prev.govExpenditures) / prev.realGDP;
-  const monetaryStance = -(S.centralBankTarget - 3.0) * 0.004; // tighter = lower output
-  const taxDrag = -((S.incomeTaxRate - 25) * 0.002 + (S.exciseTaxRate - 10) * 0.001);
-  const outputGapTarget = fiscalStance * 0.5 + monetaryStance + taxDrag + shock(0.003);
+  // 3. IS curve: output gap with polynomial policy transmission
+  //    Fiscal multiplier is non-linear: large stimulus has diminishing effect,
+  //    large austerity has accelerating contractionary effect (asymmetric)
+  const rawFiscal = (S.govSpendingLevel - prev.govExpenditures) / prev.realGDP;
+  const fiscalStance = rawFiscal >= 0
+    ? 0.5 * rawFiscal - 2.0 * rawFiscal * rawFiscal           // diminishing returns to stimulus
+    : 0.5 * rawFiscal - 3.0 * rawFiscal * rawFiscal;           // accelerating austerity drag
 
+  //    Monetary stance: quadratic — extreme rates have outsized impact
+  const rDev = S.centralBankTarget - 3.0; // deviation from neutral
+  const monetaryStance = -0.004 * rDev - 0.0008 * rDev * Math.abs(rDev);
+
+  //    Tax drag: polynomial with interaction term between income & excise
+  const iTaxDev = (S.incomeTaxRate - 25) / 100;
+  const eTaxDev = (S.exciseTaxRate - 10) / 100;
+  const taxDrag = -(0.20 * iTaxDev + 0.10 * eTaxDev
+                    + 0.80 * iTaxDev * iTaxDev
+                    + 0.40 * eTaxDev * eTaxDev
+                    + 0.50 * iTaxDev * eTaxDev);  // cross-term interaction
+
+  const outputGapTarget = fiscalStance + monetaryStance + taxDrag + shock(0.003);
+
+  //    Output gap persistence: non-linear AR — deeper recessions are stickier
   const prevOutputGap = (prev.realGDP - prev.potentialGDP) / prev.potentialGDP;
-  const outputGap = prevOutputGap * 0.7 + outputGapTarget * 0.3;
+  const persistence = prevOutputGap < 0
+    ? 0.75 + 0.05 * Math.abs(prevOutputGap) // recessions more persistent
+    : 0.65 - 0.05 * prevOutputGap;           // booms fade faster
+  const outputGap = clamp(persistence, 0.5, 0.85) * prevOutputGap
+                  + (1 - clamp(persistence, 0.5, 0.85)) * outputGapTarget;
 
   S.realGDP = S.potentialGDP * (1 + outputGap);
-  S.realGDPGrowth = ((S.realGDP / prev.realGDP) - 1) * 400; // annualized quarterly
+  S.realGDPGrowth = ((S.realGDP / prev.realGDP) - 1) * 400;
 
-  // 4. Phillips Curve: inflation
-  const inflationInertia = prev.inflationRate * 0.65;
-  const demandPull = outputGap * 3.0;
+  // 4. Phillips Curve: non-linear (convex) — inflation accelerates
+  //    at large positive gaps, flattens in slack (liquidity trap zone)
+  const inflationInertia = prev.inflationRate * 0.60 + 0.05 * prev.inflationRate * Math.abs(prev.inflationRate) / 10;
+  //    Convex demand-pull: pi = a*gap + b*gap^2 + c*gap^3
+  const g = outputGap;
+  const demandPull = 3.0 * g + 8.0 * g * g * Math.sign(g) + 15.0 * g * g * g;
   const costPush = shock(0.15);
-  const expectedInflation = 2.0 * 0.2; // anchored expectations
-  S.inflationRate = Math.max(-2, inflationInertia + demandPull + costPush + expectedInflation);
+  //    Expectations: polynomial anchoring — deviations from target weaken anchor
+  const piDev = Math.abs(prev.inflationRate - 2.0);
+  const anchorStrength = Math.max(0.05, 0.20 - 0.02 * piDev - 0.005 * piDev * piDev);
+  const expectedInflation = 2.0 * anchorStrength;
+  S.inflationRate = Math.max(-3, inflationInertia + demandPull + costPush + expectedInflation);
 
   // Update price level
   S.priceLevel *= (1 + S.inflationRate / 400);
   S.nominalGDP = S.realGDP * S.priceLevel / 100;
 
-  // 5. Okun's Law: unemployment
-  //    1% below potential => ~2% above natural unemployment
-  const okun = -outputGap * 2.0;
+  // 5. Okun's Law: polynomial — large gaps have disproportionate effects
+  //    u = NAIRU + a*(-gap) + b*(-gap)^2 * sign(-gap) + c*(-gap)^3
+  //    Captures: rapid unemployment spikes in deep recessions,
+  //    but slow hiring in recoveries (hysteresis-like asymmetry)
+  const negGap = -outputGap;
+  const okunBase = 2.0 * negGap;
+  const okunNonlinear = 1.5 * negGap * Math.abs(negGap);  // quadratic amplifier
+  const okunCubic = 0.8 * negGap * negGap * negGap;        // cubic for extreme gaps
+  const okunHysteresis = prev.unemploymentRate > S.naturalUnemployment + 2
+    ? 0.3 * (prev.unemploymentRate - S.naturalUnemployment - 2) // sticky high unemployment
+    : 0;
   S.unemploymentRate = Math.max(1.5, Math.min(25,
-    S.naturalUnemployment + okun + shock(0.15)
+    S.naturalUnemployment + okunBase + okunNonlinear + okunCubic + okunHysteresis + shock(0.15)
   ));
   S.employed = S.laborForce * (1 - S.unemploymentRate / 100);
 
   // 6. Interest rates
-  //    Taylor Rule for central bank (descriptive, player sets target)
   S.centralBankRate = S.centralBankTarget;
-  //    Sovereign risk premium: debt-to-GDP ratio pushes up all market rates
-  //    Neutral at 40% debt/GDP; each 10pp above adds ~0.15% to spreads
-  //    Negative debt (sovereign wealth) gives a small rate discount
+  //    Sovereign risk premium: cubic polynomial in debt-to-GDP
+  //    Convex: risk accelerates super-linearly at high debt levels
+  //    srp = a*(d - 0.4) + b*(d - 0.4)^2 + c*(d - 0.4)^3
   const debtToGDP = S.govDebt / S.nominalGDP;
-  const sovereignRiskPremium = Math.max(-0.5, (debtToGDP - 0.40) * 1.5);
-  //    Mortgage = CB rate + credit spread (~2.5%) + sovereign risk
-  const creditSpread = 2.5 + (S.unemploymentRate - 5) * 0.1 + sovereignRiskPremium + shock(0.1);
+  const dDev = debtToGDP - 0.40;
+  const sovereignRiskPremium = Math.max(-0.5,
+    1.0 * dDev + 2.0 * dDev * Math.abs(dDev) + 3.0 * dDev * dDev * dDev
+  );
+  //    Credit spread: polynomial in unemployment (convex in distress)
+  const uDev = S.unemploymentRate - 5;
+  const creditSpread = 2.5
+    + 0.10 * uDev + 0.02 * uDev * uDev  // quadratic: accelerating in high unemployment
+    + sovereignRiskPremium + shock(0.1);
   S.mortgageRate = Math.max(1.0, S.centralBankRate + creditSpread);
-  //    Prime = CB rate + 2% + sovereign risk
-  S.primeRate = Math.max(0.5, S.centralBankRate + 2.0 + sovereignRiskPremium + shock(0.05));
+  //    Prime rate: sovereign risk has quadratic pass-through
+  const primeSovereign = sovereignRiskPremium + 0.3 * sovereignRiskPremium * Math.abs(sovereignRiskPremium);
+  S.primeRate = Math.max(0.5, S.centralBankRate + 2.0 + primeSovereign + shock(0.05));
 
-  // 7. Business inventories
+  // 7. Business inventories: non-linear adjustment speed
+  //    Firms adjust faster when inventory gap is large (quadratic correction)
   S.prevBusinessInventories = prev.businessInventories;
   const inventoryTrend = S.realGDP * 0.15;
-  const inventoryAdjust = (inventoryTrend - prev.businessInventories) * 0.15;
+  const invGap = (inventoryTrend - prev.businessInventories) / prev.businessInventories;
+  const adjustSpeed = 0.15 + 0.30 * invGap * invGap; // faster correction for big gaps
+  const inventoryAdjust = (inventoryTrend - prev.businessInventories) * clamp(adjustSpeed, 0.05, 0.50);
   S.businessInventories = prev.businessInventories + inventoryAdjust + shock(2);
 
-  // 8. Government revenues
-  //    Income tax: progressive on nominal GDP
+  // 8. Government revenues: polynomial tax models
+  //    Income tax: progressive brackets approximated as quadratic
+  //    effective_rate = base_rate - a*(rate-25)^2 (Laffer curve: very high rates reduce base)
   const taxableIncome = S.nominalGDP * 0.55;
-  S.incomeTaxRevenue = taxableIncome * (S.incomeTaxRate / 100);
+  const iRateDev = (S.incomeTaxRate - 25) / 100;
+  const effectiveIncomeRate = (S.incomeTaxRate / 100) * (1 - 0.8 * iRateDev * iRateDev);
+  S.incomeTaxRevenue = taxableIncome * Math.max(0, effectiveIncomeRate);
 
-  //    Capital gains: linked to asset prices (correlated with GDP growth & low rates)
-  const assetGrowth = 1 + (S.realGDPGrowth / 400) + (5 - S.centralBankRate) * 0.01 + shock(0.02);
+  //    Capital gains: polynomial in GDP growth and interest rate
+  //    Asset prices follow: a + b*growth + c*growth^2 + d*(5-rate) + e*(5-rate)^2
+  const gAnn = S.realGDPGrowth / 400;
+  const rSpread = (5 - S.centralBankRate) / 100;
+  const assetGrowth = 1.0
+    + 1.2 * gAnn + 3.0 * gAnn * gAnn       // quadratic in GDP growth
+    + 1.5 * rSpread + 4.0 * rSpread * rSpread // quadratic in rate differential
+    - 2.0 * gAnn * rSpread                    // interaction term
+    + shock(0.02);
   const capitalGainsBase = S.nominalGDP * 0.08 * Math.max(0, assetGrowth);
-  S.capitalGainsTaxRevenue = capitalGainsBase * (S.capitalGainsTaxRate / 100);
+  //    Laffer effect on capital gains tax too
+  const cgRateDev = (S.capitalGainsTaxRate - 15) / 100;
+  const effectiveCGRate = (S.capitalGainsTaxRate / 100) * (1 - 1.2 * cgRateDev * cgRateDev);
+  S.capitalGainsTaxRevenue = capitalGainsBase * Math.max(0, effectiveCGRate);
 
-  //    Excise tax: on consumption (~60% of GDP)
-  const consumption = S.nominalGDP * 0.60;
-  S.exciseTaxRevenue = consumption * (S.exciseTaxRate / 100);
+  //    Excise tax: consumption share is polynomial in tax rate
+  //    Higher excise taxes shrink the consumption base (demand elasticity)
+  const exciseRatio = S.exciseTaxRate / 100;
+  const consumptionShare = 0.60 - 0.5 * exciseRatio * exciseRatio; // shrinks quadratically
+  const consumption = S.nominalGDP * Math.max(0.35, consumptionShare);
+  S.exciseTaxRevenue = consumption * exciseRatio;
 
   S.govRevenues = S.incomeTaxRevenue + S.capitalGainsTaxRevenue + S.exciseTaxRevenue;
 
   // 9. Government expenditures
-  //    Automatic stabilizers: spending rises with unemployment
-  const autoStabilizer = (S.unemploymentRate - S.naturalUnemployment) * 3;
-  const debtService = S.govDebt * (S.centralBankRate / 100) / 4;
+  //    Automatic stabilizers: polynomial — costs accelerate in deep downturns
+  //    Welfare/unemployment outlays rise quadratically with excess unemployment
+  const uExcess = Math.max(0, S.unemploymentRate - S.naturalUnemployment);
+  const autoStabilizer = 3.0 * uExcess + 0.8 * uExcess * uExcess + 0.1 * uExcess * uExcess * uExcess;
+  //    Debt service: polynomial — high debt commands higher effective rate
+  //    (weighted average of old and new debt costs)
+  const effectiveBorrowRate = S.centralBankRate + Math.max(0, sovereignRiskPremium);
+  const debtService = S.govDebt * (effectiveBorrowRate / 100) / 4;
   S.govExpenditures = S.govSpendingLevel / 4 + autoStabilizer + debtService;
   // Annualize for display
   S.govExpenditures *= 4;
-  S.govRevenues = S.govRevenues; // already annual-ish approximation
 
   // Government debt
   const deficit = (S.govExpenditures - S.govRevenues) / 4;

@@ -49,23 +49,41 @@ its resources. It grows each quarter according to three factors:
 
 Implementation details:
 
-  a) Capital accumulation:
+  a) Population and labor force (logistic growth):
+     Population follows a logistic model with carrying capacity K=120M:
+       qPopGrowth = (baseRate / 4) * max(0.1, 1 - (P/K)^1.5)
+     This produces S-curve demographics: fast growth at low population,
+     decelerating as the nation approaches carrying capacity.
+
+     Labor force participation is a quadratic function of population
+     density (popRatio = P/K):
+       participation = 0.50 + 0.04*popRatio - 0.08*popRatio^2
+     Participation rises slightly at low density (urbanization gains)
+     then declines at high density (aging demographics, congestion).
+     Clamped to [0.42, 0.55].
+
+  b) Capital accumulation:
      - Investment is fixed at 20% of real GDP (investment share).
      - Capital depreciates at 2% per year (0.5% per quarter).
      - K_t = K_{t-1} * (1 - 0.005) + (Investment / 4)
-
-  b) Labor growth contribution:
-     - Derived from population growth scaled by a labor elasticity of 0.6.
-     - labor_growth = (populationGrowthRate / 400) * 0.6
 
   c) Total Factor Productivity (TFP):
      - Baseline TFP growth is 0.5% per year (0.125% per quarter).
      - A stochastic shock of magnitude +/-0.1% is added each quarter.
 
-  d) Capital contribution:
-     - capital_contrib = 0.3 * (quarterly_investment / capital_stock)
-     - The 0.3 coefficient represents capital's share of output in a
-       Cobb-Douglas production function (Y = A * K^0.3 * L^0.7).
+  d) Capital contribution (cubic polynomial with diminishing returns):
+     Instead of the linear Cobb-Douglas approximation, the capital
+     contribution uses a cubic polynomial in the investment-to-capital
+     ratio (x = I_quarterly / K):
+
+       capital_contrib = 0.45*x - 1.2*x^2 + 1.0*x^3
+
+     At low x: nearly linear growth (0.45*x dominates).
+     At moderate x: diminishing returns kick in (-1.2*x^2).
+     At high x: the cubic term (+1.0*x^3) provides a slight recovery,
+     modeling economies of scale in very capital-intensive phases.
+     This captures the empirical observation that the first units of
+     capital investment are highly productive, but returns diminish.
 
   e) Potential GDP update:
      - potentialGDP_t = potentialGDP_{t-1} * (1 + labor_growth
@@ -77,29 +95,53 @@ Implementation details:
 Reference: Hicks, J. R. (1937). "Mr. Keynes and the Classics: A
 Suggested Interpretation." Econometrica, 5(2), 147-159.
 
-The IS curve determines the output gap, which is the percentage
-deviation of actual GDP from potential GDP. Three policy channels
-feed into the target output gap:
+The IS curve determines the output gap using polynomial policy
+transmission channels. All three channels use non-linear forms:
 
-  a) Fiscal stance:
-     fiscal_stance = (gov_spending_target - prev_expenditures) / prev_realGDP
-     - Measures the change in fiscal impulse relative to the economy.
-     - Multiplied by 0.5 (a fiscal multiplier).
+  a) Fiscal stance (asymmetric quadratic):
+     rawFiscal = (gov_spending_target - prev_expenditures) / prev_realGDP
 
-  b) Monetary stance:
-     monetary_stance = -(centralBankRate - 3.0) * 0.004
-     - The neutral rate is assumed to be 3.0%.
-     - Rates above neutral contract demand; below neutral expand it.
+     If rawFiscal >= 0 (stimulus):
+       fiscal = 0.5*f - 2.0*f^2      (diminishing returns)
+     If rawFiscal < 0 (austerity):
+       fiscal = 0.5*f - 3.0*f^2      (accelerating contraction)
 
-  c) Tax drag:
-     tax_drag = -((incomeTaxRate - 25) * 0.002 + (exciseTaxRate - 10) * 0.001)
-     - Higher-than-baseline tax rates reduce aggregate demand.
-     - Income tax has a stronger drag coefficient than excise tax.
+     This asymmetry means: moderate stimulus is effective but large
+     stimulus has diminishing impact (crowding out), while austerity
+     is contractionary and becomes more so at larger magnitudes.
 
-  d) Output gap persistence:
-     outputGap_t = 0.7 * outputGap_{t-1} + 0.3 * outputGapTarget
-     - The output gap adjusts gradually (autoregressive parameter of 0.7).
-     - This captures the real-world inertia of economic cycles.
+  b) Monetary stance (quadratic):
+     rDev = centralBankRate - 3.0  (deviation from neutral)
+     monetary = -0.004*rDev - 0.0008*rDev*|rDev|
+
+     The quadratic term means extreme rate deviations (very loose or
+     very tight) have outsized impact on demand. At 6% above neutral,
+     the effect is roughly 60% larger than a linear model predicts.
+
+  c) Tax drag (quadratic with cross-term):
+     iTaxDev = (incomeTaxRate - 25) / 100
+     eTaxDev = (exciseTaxRate - 10) / 100
+
+     taxDrag = -(0.20*i + 0.10*e + 0.80*i^2 + 0.40*e^2 + 0.50*i*e)
+
+     The quadratic terms (i^2, e^2) capture the accelerating
+     disincentive effect of high tax rates. The interaction term
+     (i*e) models the compounding drag when multiple taxes are high
+     simultaneously — the combined burden exceeds the sum of parts.
+
+  d) Output gap persistence (state-dependent AR):
+     The autoregressive parameter is itself a function of the gap:
+
+     If prevGap < 0 (recession):
+       persistence = 0.75 + 0.05*|prevGap|  (recessions are sticky)
+     If prevGap >= 0 (expansion):
+       persistence = 0.65 - 0.05*prevGap    (booms fade faster)
+
+     Clamped to [0.5, 0.85]. This captures the empirical observation
+     that recessions exhibit hysteresis while booms self-correct
+     (capacity constraints, tightening policy).
+
+     outputGap_t = persistence * prevGap + (1-persistence) * target
 
   e) Actual GDP:
      realGDP_t = potentialGDP_t * (1 + outputGap_t)
@@ -114,31 +156,49 @@ and the Rate of Change of Money Wage Rates in the United Kingdom,
 Also: Friedman, M. (1968). "The Role of Monetary Policy." American
 Economic Review, 58(1), 1-17. (Expectations-augmented version.)
 
-The simulation uses a New Keynesian Phillips Curve with three components:
+The simulation uses a non-linear New Keynesian Phillips Curve:
 
     inflation_t = inertia + demand_pull + cost_push + expected_inflation
 
-  a) Inflation inertia:
-     inertia = 0.65 * inflation_{t-1}
-     - Past inflation feeds into current inflation (adaptive expectations).
+  a) Inflation inertia (quadratic self-reinforcement):
+     inertia = 0.60*pi_{t-1} + 0.05*pi_{t-1}*|pi_{t-1}|/10
 
-  b) Demand-pull inflation:
-     demand_pull = outputGap * 3.0
-     - A positive output gap (economy above potential) creates upward
-       pressure on prices. The coefficient of 3.0 means a 1% positive
-       output gap adds 3 percentage points to inflation.
+     The quadratic term means high inflation becomes self-reinforcing
+     (wage-price spiral), while low/moderate inflation has standard
+     persistence. At 10% inflation the inertia coefficient effectively
+     rises from 0.60 to 0.65.
+
+  b) Demand-pull inflation (cubic polynomial):
+     g = outputGap
+     demand_pull = 3.0*g + 8.0*g^2*sign(g) + 15.0*g^3
+
+     Linear term (3.0*g): standard Phillips curve slope.
+     Quadratic term (8.0*g^2*sign(g)): inflation accelerates faster
+       at large positive gaps (capacity constraints, bottlenecks).
+       The sign(g) preserves correct direction for negative gaps.
+     Cubic term (15.0*g^3): extreme gaps produce very large price
+       movements (hyperinflation risk / deep deflation).
+
+     At gap = +2%: demand_pull = 6.0 + 3.2 + 1.2 = 10.4%
+     At gap = -2%: demand_pull = -6.0 - 3.2 + 1.2 = -8.0%
+     (asymmetric: inflation rises faster than it falls)
 
   c) Cost-push shocks:
      cost_push = random_shock(magnitude = 0.15)
-     - Represents supply-side disturbances (oil prices, supply chain
-       disruptions, etc.).
 
-  d) Anchored inflation expectations:
-     expected_inflation = 2.0 * 0.2 = 0.4
-     - Long-run expectations are anchored at the 2% target.
-     - The weight of 0.2 reflects partial credibility of the central bank.
+  d) Inflation expectations (polynomial de-anchoring):
+     piDev = |inflation_{t-1} - 2.0|
+     anchorStrength = max(0.05, 0.20 - 0.02*piDev - 0.005*piDev^2)
+     expected_inflation = 2.0 * anchorStrength
 
-  e) Floor: Inflation is bounded below at -2% (deflation limit).
+     When inflation is near 2%, expectations are well-anchored
+     (anchorStrength ~ 0.20). As inflation deviates, the anchor
+     weakens quadratically — capturing the empirical finding that
+     prolonged off-target inflation erodes central bank credibility.
+     At 6% deviation, anchorStrength drops to ~0.05 (near-zero weight
+     on the target).
+
+  e) Floor: Inflation is bounded below at -3% (deflation limit).
 
   f) Price level update:
      priceLevel_t = priceLevel_{t-1} * (1 + inflation_t / 400)
@@ -153,25 +213,41 @@ Reference: Okun, A. M. (1962). "Potential GNP: Its Measurement and
 Significance." Proceedings of the Business and Economics Statistics
 Section, American Statistical Association, 98-104.
 
-Okun's Law links the output gap to the unemployment rate:
+Unemployment uses a cubic polynomial in the output gap, with a
+hysteresis term for prolonged downturns:
 
-    unemployment_t = NAIRU + okun_coefficient * (-outputGap) + shock
+    Let negGap = -outputGap
 
-  a) NAIRU (Non-Accelerating Inflation Rate of Unemployment):
-     - Set at 5.0%, representing the natural rate of unemployment.
+    unemployment_t = NAIRU
+                   + 2.0 * negGap              (linear Okun)
+                   + 1.5 * negGap * |negGap|   (quadratic amplifier)
+                   + 0.8 * negGap^3             (cubic for extremes)
+                   + hysteresis + shock
 
-  b) Okun coefficient:
-     - Set at 2.0, meaning a 1% negative output gap raises unemployment
-       by 2 percentage points above NAIRU. This is consistent with
-       empirical estimates for western economies.
+  a) NAIRU: Set at 5.0%.
 
-  c) Stochastic component:
-     - A random shock of magnitude +/-0.15 percentage points.
+  b) Linear term (2.0 * negGap):
+     Standard Okun's Law — 1% below potential adds 2pp unemployment.
 
-  d) Bounds:
-     - Unemployment is clamped between 1.5% and 25%.
+  c) Quadratic amplifier (1.5 * negGap * |negGap|):
+     Deep recessions cause disproportionate job losses (mass layoffs,
+     firm closures). The |negGap| preserves sign correctness.
 
-  e) Employment:
+  d) Cubic term (0.8 * negGap^3):
+     Extreme gaps (e.g., financial crises) have devastating employment
+     effects. At -3% gap: cubic adds 0.8*(-27) = -21.6pp to the base.
+
+  e) Hysteresis term:
+     If prev_unemployment > NAIRU + 2:
+       hysteresis = 0.3 * (prev_unemployment - NAIRU - 2)
+     Else: hysteresis = 0
+     Prolonged high unemployment damages skills, networks, and labor
+     force attachment, making it harder to recover — a well-documented
+     effect in European labor markets post-2008.
+
+  f) Bounds: Clamped to [1.5%, 25%].
+
+  g) Employment:
      employed = laborForce * (1 - unemploymentRate / 100)
 
 
@@ -182,40 +258,48 @@ Practice." Carnegie-Rochester Conference Series on Public Policy,
 39, 195-214.
 
 The simulation models three interest rates, all influenced by a
-sovereign risk premium linked to the government's debt-to-GDP ratio:
+polynomial sovereign risk premium:
 
-  a) Sovereign risk premium:
-     debtToGDP = govDebt / nominalGDP
-     sovereignRiskPremium = max(-0.5, (debtToGDP - 0.40) * 1.5)
-     - The premium is zero when debt-to-GDP is at the 40% baseline.
-     - Each 10 percentage points of debt above 40% adds approximately
-       0.15% to all market interest rate spreads.
-     - When the government holds sovereign wealth (negative debt), the
-       premium becomes negative (down to -0.5%), lowering market rates
-       as a reward for fiscal strength.
-     - This creates a feedback loop: high debt raises rates, which
-       increases debt service costs, which worsens the deficit.
+  a) Sovereign risk premium (cubic polynomial):
+     d = debtToGDP - 0.40   (deviation from 40% baseline)
+
+     sovereignRiskPremium = max(-0.5, 1.0*d + 2.0*d*|d| + 3.0*d^3)
+
+     Linear (1.0*d): baseline risk response.
+     Quadratic (2.0*d*|d|): risk accelerates at moderate debt levels.
+     Cubic (3.0*d^3): crisis-level risk at very high debt.
+
+     At debt/GDP = 60%: srp = 0.20 + 0.08 + 0.024 = 0.30%
+     At debt/GDP = 80%: srp = 0.40 + 0.32 + 0.19 = 0.91%
+     At debt/GDP = 100%: srp = 0.60 + 0.72 + 0.65 = 1.97%
+     At debt/GDP = 120%: srp = 0.80 + 1.28 + 1.54 = 3.62%
+
+     The convexity means debt crises escalate rapidly once triggered.
+     Sovereign wealth (negative d) gives a modest discount, capped
+     at -0.5%.
 
   b) Central bank policy rate:
      - Directly set by the player via the "Central Bank Rate" slider.
-     - In a fully automated version this would follow the Taylor Rule:
-       i = r* + pi + 0.5*(pi - pi*) + 0.5*(y - y*)
      - The player effectively acts as the central bank governor.
 
-  c) Home mortgage interest rate:
-     mortgage_rate = centralBankRate + credit_spread
-     credit_spread = 2.5 + (unemployment - 5.0) * 0.1
+  c) Home mortgage interest rate (quadratic credit spread):
+     u = unemploymentRate - 5.0
+     credit_spread = 2.5 + 0.10*u + 0.02*u^2
                      + sovereignRiskPremium + shock(0.1)
-     - Base spread of 2.5% over the policy rate.
-     - Spread widens when unemployment is high (credit risk increases).
-     - Spread widens further with high sovereign debt (country risk).
-     - Minimum mortgage rate is floored at 1.0%.
 
-  d) Commercial bank prime rate:
-     prime_rate = centralBankRate + 2.0 + sovereignRiskPremium + shock(0.05)
-     - Standard 2% markup over the policy rate.
-     - Also includes the sovereign risk premium from government debt.
-     - Minimum prime rate is floored at 0.5%.
+     The quadratic term (0.02*u^2) means credit conditions tighten
+     sharply in high-unemployment environments as banks face rising
+     default rates (non-linear credit risk).
+     Minimum mortgage rate floored at 1.0%.
+
+  d) Commercial bank prime rate (quadratic sovereign pass-through):
+     primeSovereign = srp + 0.3*srp*|srp|
+     prime_rate = centralBankRate + 2.0 + primeSovereign + shock(0.05)
+
+     The sovereign risk premium is amplified quadratically when
+     passed to the prime rate, reflecting that commercial banks
+     face compounding funding costs during sovereign stress.
+     Minimum prime rate floored at 0.5%.
 
 
 7. BUSINESS INVENTORY CYCLE
@@ -224,45 +308,69 @@ Reference: Blinder, A. S. & Maccini, L. J. (1991). "Taking Stock: A
 Critical Assessment of Recent Research on Inventories." Journal of
 Economic Perspectives, 5(1), 73-96.
 
-Business inventories adjust toward a target level proportional to GDP:
+Business inventories use a non-linear partial adjustment model where
+the speed of adjustment is itself a quadratic function of the gap:
 
     inventory_trend = realGDP * 0.15
-    adjustment = (inventory_trend - prev_inventories) * 0.15
+    invGap = (trend - prev_inventories) / prev_inventories
+    adjustSpeed = clamp(0.15 + 0.30*invGap^2, 0.05, 0.50)
+    adjustment = (trend - prev_inventories) * adjustSpeed
     inventories_t = prev_inventories + adjustment + shock(2)
 
-  - The target inventory-to-GDP ratio is 15%.
-  - Only 15% of the gap is closed each quarter (partial adjustment model).
-  - A stochastic shock of +/-2 billion is added.
-  - The "Change in Business Inventories" statistic reports:
-    delta_inventories = inventories_t - inventories_{t-1}
+  - Target inventory-to-GDP ratio is 15%.
+  - Base adjustment speed is 15% of the gap per quarter.
+  - Quadratic acceleration (0.30*invGap^2): firms correct large
+    imbalances faster (rush orders when stockouts loom, fire sales
+    when overstocked). Adjustment speed can reach 50% for big gaps.
+  - Small imbalances are corrected gradually (minimum 5% speed).
 
 
 8. GOVERNMENT REVENUE MODEL
 ============================
-Total government revenue is the sum of three tax streams:
+Total government revenue uses polynomial models incorporating
+Laffer curve effects and demand elasticity:
 
-  a) Income tax:
+  a) Income tax (quadratic Laffer curve):
      taxable_income = nominalGDP * 0.55
-     income_tax_revenue = taxable_income * (incomeTaxRate / 100)
-     - 55% of nominal GDP is treated as the taxable income base.
-     - The player controls the effective income tax rate (default 25%).
+     iRateDev = (incomeTaxRate - 25) / 100
+     effective_rate = (incomeTaxRate/100) * (1 - 0.8*iRateDev^2)
+     income_tax_revenue = taxable_income * max(0, effective_rate)
 
-  b) Capital gains tax:
-     asset_growth = 1 + (realGDPGrowth / 400) + (5 - centralBankRate) * 0.01
-                    + shock(0.02)
-     capital_gains_base = nominalGDP * 0.08 * max(0, asset_growth)
-     capital_gains_tax = capital_gains_base * (capitalGainsTaxRate / 100)
-     - Realized capital gains are modeled as 8% of nominal GDP, scaled
-       by an asset growth factor.
-     - Asset growth correlates positively with GDP growth and negatively
-       with interest rates (lower rates inflate asset prices).
-     - The player controls the capital gains tax rate (default 15%).
+     The Laffer term (1 - 0.8*iRateDev^2) reduces the effective tax
+     take when rates deviate far from the 25% baseline. At 50%
+     nominal rate, the effective rate is ~50% * (1 - 0.05) = 47.5%.
+     At extreme rates, behavioral responses (evasion, reduced labor
+     supply) erode the tax base.
 
-  c) Excise tax:
-     consumption = nominalGDP * 0.60
-     excise_tax = consumption * (exciseTaxRate / 100)
-     - Consumption is assumed at 60% of nominal GDP.
-     - The player controls the excise tax rate (default 10%).
+  b) Capital gains tax (polynomial asset model + Laffer):
+     Asset growth uses a bivariate quadratic with interaction:
+       g = realGDPGrowth / 400
+       r = (5 - centralBankRate) / 100
+       assetGrowth = 1.0 + 1.2*g + 3.0*g^2
+                     + 1.5*r + 4.0*r^2 - 2.0*g*r + shock
+
+     Quadratic in growth (3.0*g^2): bull markets amplify gains.
+     Quadratic in rates (4.0*r^2): low rates inflate asset bubbles.
+     Cross-term (-2.0*g*r): interaction dampening — strong growth
+     with low rates partially offset (overheating triggers correction).
+
+     Laffer effect on capital gains:
+       cgRateDev = (capitalGainsTaxRate - 15) / 100
+       effective_cg_rate = (rate/100) * (1 - 1.2*cgRateDev^2)
+     Capital gains are more elastically responsive to tax rates than
+     income (coefficient 1.2 vs 0.8), as investors can defer
+     realization.
+
+  c) Excise tax (quadratic consumption elasticity):
+     exciseRatio = exciseTaxRate / 100
+     consumptionShare = max(0.35, 0.60 - 0.5*exciseRatio^2)
+     consumption = nominalGDP * consumptionShare
+     excise_tax = consumption * exciseRatio
+
+     The consumption share of GDP shrinks quadratically as excise
+     taxes rise, modeling price elasticity of demand. At 25% excise
+     rate, consumption share drops from 60% to ~57% of GDP. This
+     limits the revenue gain from very high excise rates.
 
   d) Total revenue:
      govRevenues = income_tax + capital_gains_tax + excise_tax
@@ -270,22 +378,34 @@ Total government revenue is the sum of three tax streams:
 
 9. GOVERNMENT EXPENDITURE MODEL
 ================================
-Government spending has three components:
+Government spending uses polynomial automatic stabilizers and
+debt-aware borrowing costs:
 
   a) Discretionary spending:
      base_spending = govSpendingLevel / 4  (quarterly)
      - The player sets the annual spending target (default 410 billion).
 
-  b) Automatic stabilizers:
-     auto_stabilizer = (unemploymentRate - NAIRU) * 3
-     - When unemployment exceeds the natural rate, spending automatically
-       increases (unemployment benefits, welfare payments, etc.).
-     - Each percentage point above NAIRU adds 3 billion per quarter.
+  b) Automatic stabilizers (cubic polynomial):
+     uExcess = max(0, unemploymentRate - NAIRU)
+     auto_stabilizer = 3.0*u + 0.8*u^2 + 0.1*u^3
 
-  c) Debt service:
-     debt_service = govDebt * (centralBankRate / 100) / 4
-     - Interest payments on outstanding government debt.
-     - Higher policy rates directly increase the government's borrowing cost.
+     Linear (3.0*u): standard unemployment benefits.
+     Quadratic (0.8*u^2): emergency programs, extended benefits.
+     Cubic (0.1*u^3): crisis spending (bailouts, emergency relief)
+       kicks in during severe downturns.
+
+     At 2pp above NAIRU: stabilizer = 6.0 + 3.2 + 0.8 = 10.0B/qtr
+     At 5pp above NAIRU: stabilizer = 15 + 20 + 12.5 = 47.5B/qtr
+     The cubic escalation reflects real-world crisis responses.
+
+  c) Debt service (sovereign-risk-adjusted):
+     effectiveBorrowRate = centralBankRate + max(0, sovereignRiskPremium)
+     debt_service = govDebt * (effectiveBorrowRate / 100) / 4
+
+     The government borrows at the policy rate plus the sovereign
+     risk premium (from Section 6a). This creates a non-linear
+     feedback loop: high debt raises the risk premium, which raises
+     borrowing costs, which increases spending, which increases debt.
 
   d) Total quarterly expenditure:
      quarterly_spending = base_spending + auto_stabilizer + debt_service
